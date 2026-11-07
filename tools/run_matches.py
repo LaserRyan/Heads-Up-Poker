@@ -6,7 +6,7 @@ directly, using the real game.py engine and the judge's duplicate scoring
 (both halves, seats swapped, 95% interval on bb/deal).
 
 From the repo root:
-    python tools/run_matches.py                          # agent.py vs every baseline, 3 seeds
+    python tools/run_matches.py                          # agent.py vs baselines + practice bots, 3 seeds
     python tools/run_matches.py --seeds 5 --deals 500
     python tools/run_matches.py --opponents baseline-bots/baseline_random.py
     python tools/run_matches.py --bot some_other_agent.py --jobs 2
@@ -173,7 +173,8 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--bot", default=os.path.join(ROOT, "agent.py"))
     p.add_argument("--opponents", nargs="*",
-                   default=sorted(glob.glob(os.path.join(ROOT, "baseline-bots", "*.py"))))
+                   default=sorted(glob.glob(os.path.join(ROOT, "baseline-bots", "baseline_*.py")))
+                   + sorted(glob.glob(os.path.join(ROOT, "practice-bots", "practice_*.py"))))
     p.add_argument("--seeds", type=int, default=3)
     p.add_argument("--seed-offset", type=int, default=0)
     p.add_argument("--deals", type=int, default=1000)
@@ -194,6 +195,13 @@ def main() -> None:
     for r in results:
         print(f"{r['opp']:34} {r['seed']:7} {r['mean']:+8.3f}  [{r['lo']:+7.3f},{r['hi']:+7.3f}]  "
               f"{r['verdict']:18} {r['time']:10.2f} {r['errors']:6d}")
+    by_opp: dict[str, list[float]] = {}
+    for r in results:
+        by_opp.setdefault(r["opp"], []).append(r["mean"])
+    print(f"\n{'opponent':34} {'avg bb/deal':>11}")
+    for opp, means in by_opp.items():
+        print(f"{opp:34} {statistics.fmean(means):+11.3f}")
+    print(f"{'FIELD AVERAGE':34} {statistics.fmean(r['mean'] for r in results):+11.3f}")
     wins = sum(r["verdict"].startswith("WIN") for r in results)
     print(f"\nwins {wins}/{len(results)}, worst time {max(r['time'] for r in results):.2f}s/half, "
           f"total errors {sum(r['errors'] for r in results)}")

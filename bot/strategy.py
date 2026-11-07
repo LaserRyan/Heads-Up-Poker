@@ -1,5 +1,5 @@
 """
-strategy.py - Tulip v1: equity + pot odds.
+strategy.py - Tulip v2: equity + pot odds, adjusted to the opponent.
 
 How a decision is made:
   1. Estimate EQUITY: how often our hand wins at showdown.
@@ -13,7 +13,18 @@ How a decision is made:
      - semi-bluffs: hands with real chances to improve, on flop/turn
      - rare pure bluffs on the river when checked to.
 
-No opponent modelling across hands yet (that's a later step).
+  4. Adjust to the opponent (bot/reads.py learns them during the half).
+     Every adjustment is capped and scaled by how sure we are of the read:
+     #2 respect honest bettors   - fold more to bets from players whose bets
+                                   keep turning out strong at showdown
+     #4 value vs callers         - bet more hands, and bigger, against
+                                   players who rarely fold
+     #5 open up vs passive       - play and raise more hands preflop against
+                                   players who rarely raise preflop
+     #1 catch bluffers           - (checkpoint 2) call lighter vs bluffers
+     #3 targeted bluffing        - (checkpoint 2) bluff folders more, never
+                                   bluff players who don't fold
+
 All tunable numbers live in PARAMS so the match runner can sweep them.
 """
 
@@ -21,6 +32,8 @@ import os
 import time
 
 import numpy as np
+
+from bot import reads
 
 from game import Action, AgentConfig, HandResult, Observation, Street
 from bot.fast_eval import colex, current_strength_batch, omaha_batch, scores_table
@@ -48,6 +61,7 @@ PARAMS = {
     # bluffs
     "semi_lo": 0.42, "semi_hi": 0.60, "semi_freq": 0.30,
     "bluff_eq_max": 0.25, "bluff_freq": 0.07,
+    "air_freq": 0.0,          # flop/turn bluff with hands too weak to semi-bluff (only vs folders)
     # how strongly opponent aggression shifts their range (Q10: mild)
     "alpha_per_unit": 0.5, "alpha_cap": 1.5,
     # simulation size and time budget
@@ -57,7 +71,59 @@ PARAMS = {
     # The judge also charges web-server time we can't see (~0.2-1 ms per call
     # on a laptop). Add this much per call to our own clock to stay honest.
     "overhead_per_call": 0.0008,
+    # which opponent adjustments are switched on
+    "adapt": {"respect", "value", "open", "bluffcatch", "bluff"},
 }
+
+
+def adjusted_params(memory: dict) -> dict:
+    """PARAMS shifted toward exploiting this opponent. Each shift is capped
+    and scaled by reads.confidence(), so early in a half this is just PARAMS."""
+    conf = reads.confidence(memory)
+    if conf <= 0 or not PARAMS["adapt"]:
+        return PARAMS
+    on = PARAMS["adapt"]
+    P = dict(PARAMS)
+    P["bet_half"], P["bet_pot"] = dict(P["bet_half"]), dict(P["bet_pot"])
+    P["raise_half"], P["raise_pot"] = dict(P["raise_half"]), dict(P["raise_pot"])
+
+    # How much do their bets mean? (#2 up, #1 down)
+    lo = -0.4 if "bluffcatch" in on else 0.0
+    hi = 0.6 if "respect" in on else 0.0
+    shift = float(np.clip(3.0 * (reads.value(memory, "honesty") - reads.PRIORS["honesty"][0]), lo, hi))
+    P["alpha_per_unit"] = PARAMS["alpha_per_unit"] * (1.0 + conf * shift)
+
+    fold = reads.value(memory, "fold_rate")
+    f0 = reads.PRIORS["fold_rate"][0]
+    caller = conf * float(np.clip((f0 - fold) / 0.25, 0.0, 1.0))   # 1 = never folds
+    folder = conf * float(np.clip((fold - f0) / 0.30, 0.0, 1.0))   # 1 = folds a lot
+
+    if "value" in on and caller > 0:  # #4: more and bigger value bets
+        for st in P["bet_half"]:
+            P["bet_half"][st] -= 0.06 * caller
+            P["bet_pot"][st] = max(P["bet_half"][st] + 0.02, P["bet_pot"][st] - 0.08 * caller)
+            P["raise_half"][st] -= 0.03 * caller
+            P["raise_pot"][st] -= 0.04 * caller
+
+    if "bluff" in on:  # #3: bluff folders more (small cap), never bluff callers
+        P["semi_freq"] = (PARAMS["semi_freq"] + 0.20 * folder) * (1.0 - 0.6 * caller)
+        P["bluff_freq"] = (PARAMS["bluff_freq"] + 0.10 * folder) * (1.0 - caller)
+        P["bluff_eq_max"] = PARAMS["bluff_eq_max"] + 0.10 * folder
+        P["air_freq"] = 0.25 * folder
+        # steal more from players who fold to preflop raises
+        pf0 = reads.PRIORS["pf_fold"][0]
+        pf_folder = conf * float(np.clip((reads.value(memory, "pf_fold") - pf0) / 0.30, 0.0, 1.0))
+        P["pf_open_half"] = PARAMS["pf_open_half"] - 0.45 * pf_folder
+        P["pf_bb_raise"] = PARAMS["pf_bb_raise"] - 0.40 * pf_folder
+
+    if "open" in on:  # #5: play and raise more vs passive preflop players
+        r0 = reads.PRIORS["pf_raise"][0]
+        passive = conf * float(np.clip((r0 - reads.value(memory, "pf_raise")) / 0.25, 0.0, 1.0))
+        P["pf_open_call"] = max(0.03, PARAMS["pf_open_call"] - 0.10 * passive)
+        P["pf_open_half"] = min(P["pf_open_half"], PARAMS["pf_open_half"] - 0.15 * passive)
+        P["pf_open_pot"] = PARAMS["pf_open_pot"] - 0.10 * passive
+        P["pf_bb_raise"] = min(P["pf_bb_raise"], PARAMS["pf_bb_raise"] - 0.15 * passive)
+    return P
 
 
 # ----- helpers ----------------------------------------------------------------
@@ -160,16 +226,28 @@ def new_half(config: AgentConfig, memory: dict) -> None:
     memory["calls"] = 0
     memory["bank"] = float(config.time_bank_seconds)
     memory["num_hands"] = int(config.num_hands)
+    reads.new(memory)
 
 
 def on_hand_end(result: HandResult, memory: dict) -> None:
-    pass
+    t0 = time.perf_counter()
+    try:
+        reads.hand_end(result, memory, memory["rng"])
+    finally:
+        memory["used"] = memory.get("used", 0.0) + time.perf_counter() - t0
 
 
 def choose_action(obs: Observation, memory: dict) -> Action:
     t0 = time.perf_counter()
     try:
-        return _decide(obs, memory)
+        reads.observe(obs, memory)
+        cached = memory.get("params")
+        if cached is None or cached[0] != obs.hand_index:
+            cached = (obs.hand_index, adjusted_params(memory))
+            memory["params"] = cached
+        action = _decide(obs, memory, cached[1])
+        reads.note_action(obs, action, memory)
+        return action
     finally:
         memory["used"] = memory.get("used", 0.0) + time.perf_counter() - t0
         memory["calls"] = memory.get("calls", 0) + 1
@@ -197,8 +275,7 @@ def _sample_budget(obs: Observation, memory: dict) -> int:
     return P["samples"]
 
 
-def _decide(obs: Observation, memory: dict) -> Action:
-    P = PARAMS
+def _decide(obs: Observation, memory: dict, P: dict) -> Action:
     rng = memory["rng"]
     street = obs.street
     opp_units = _aggression_units(obs, street)
@@ -255,6 +332,9 @@ def _decide(obs: Observation, memory: dict) -> Action:
                 and rng.random() < P["semi_freq"]:
             return _pick(obs, Action.RAISE_HALF)
         if street == Street.RIVER and e <= P["bluff_eq_max"] and rng.random() < P["bluff_freq"]:
+            return _pick(obs, Action.RAISE_HALF)
+        if street != Street.RIVER and e < P["semi_lo"] and P["air_freq"] > 0 \
+                and rng.random() < P["air_freq"]:
             return _pick(obs, Action.RAISE_HALF)
         return Action.CHECK_CALL
 
