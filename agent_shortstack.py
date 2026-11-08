@@ -1,5 +1,7 @@
 """
-agent_shortstack.py - ShortStackOmaha (his bot): Heads-Up Short Deck 5-Card PLO. agent.py runs this when it is active.
+agent_shortstack.py - ShortStackOmaha, shown to the judge as "Tulip v3" (our
+team's inside joke - none of Tulip's code is in here). Heads-Up Short Deck
+5-Card PLO. This is the bot agent.py runs.
 
 Run it:
     python agent.py                  # listens on port 5008
@@ -47,7 +49,11 @@ from pokerbot.policy import Budget, Policy
 from pokerbot.strength import Strength
 
 PARTICIPANT = "5-Points"
-AGENT_NAME = "ShortStackOmaha"
+AGENT_NAME = "Tulip v3"   # really ShortStackOmaha; see agent.py for why
+
+# This bot reads plain JSON data (dicts, action names) rather than the
+# Observation objects game.py builds; tools/run_matches.py adapts when set.
+TAKES_DICTS = True
 
 # Slow setup belongs at import time, not in the first decision: the server has
 # 15 s to answer its first request but only ~0.5 ms per decision afterwards.

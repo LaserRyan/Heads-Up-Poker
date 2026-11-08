@@ -72,7 +72,25 @@ def load_bot(path: str):
     mod = importlib.util.module_from_spec(spec)
     sys.path.insert(0, os.path.dirname(os.path.abspath(path)))
     spec.loader.exec_module(mod)
+    if getattr(mod, "TAKES_DICTS", False):
+        return _dict_api(mod)
     return mod
+
+
+def _dict_api(mod):
+    """Wrap a bot that takes JSON-style dicts (like the judge sends) and
+    returns action names, so it plays through the same Seat interface."""
+    from game import Action
+
+    def choose_action(obs, memory):
+        a = mod.choose_action(obs.to_dict(), memory)
+        return Action[a] if isinstance(a, str) else Action(a)
+
+    return types.SimpleNamespace(
+        new_half=lambda config, memory: mod.new_half(config.to_dict(), memory),
+        choose_action=choose_action,
+        on_hand_end=lambda result, memory: mod.on_hand_end(result.to_dict(), memory),
+    )
 
 
 class Seat:
