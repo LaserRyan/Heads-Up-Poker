@@ -17,13 +17,14 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tulip.fast_eval import colex, omaha_batch  # noqa: E402
+from tulip.fast_eval import colex, omaha_batch, scores_table  # noqa: E402
 from game import Action, Street  # noqa: E402
 
 _DATA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                      "tulip", "data", "preflop_equity.npy")
 PREFLOP = np.load(_DATA).astype(np.float32)
 PREFLOP_SORTED = np.sort(PREFLOP)
+scores_table()  # build the scoring table at startup, not inside the first (timed) decision
 
 DEFAULTS = {
     "pf_play": 0.20,       # preflop: fold hands below this percentile when facing a raise/open
