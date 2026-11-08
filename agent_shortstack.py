@@ -46,7 +46,7 @@ from pokerbot.opponent import OppModel
 from pokerbot.policy import Budget, Policy
 from pokerbot.strength import Strength
 
-PARTICIPANT = "5 Points"
+PARTICIPANT = "5-Points"
 AGENT_NAME = "ShortStackOmaha"
 
 # Slow setup belongs at import time, not in the first decision: the server has
