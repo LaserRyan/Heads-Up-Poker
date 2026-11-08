@@ -3,7 +3,7 @@ show_reads.py - what Tulip believes about each opponent after a half.
 
     python tools/show_reads.py [--deals 1000]
 
-Sanity check for bot/reads.py: a nit should show a high fold rate, a calling
+Sanity check for tulip/reads.py: a nit should show a high fold rate, a calling
 station a low one, a maniac low honesty, and so on.
 """
 
@@ -17,7 +17,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 import run_matches as rm  # noqa: E402
-from bot import reads  # noqa: E402
+from tulip import reads  # noqa: E402
 
 
 def main() -> None:
@@ -28,7 +28,7 @@ def main() -> None:
         + sorted(glob.glob(os.path.join(ROOT, "practice-bots", "practice_*.py")))
     print(f"{'opponent':30} {'fold_rate':>9} {'honesty':>8} {'pf_raise':>8} {'pf_fold':>7} {'conf':>5}")
     for opp in opps:
-        _, a, _ = rm.play_half(rm.load_bot(os.path.join(ROOT, "agent.py")), rm.load_bot(opp),
+        _, a, _ = rm.play_half(rm.load_bot(os.path.join(ROOT, "agent_tulip.py")), rm.load_bot(opp),
                                "reads", args.deals, 1)
         m = a.memory
         print(f"{os.path.basename(opp):30} {reads.value(m, 'fold_rate'):9.2f} "

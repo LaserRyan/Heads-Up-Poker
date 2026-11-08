@@ -195,3 +195,115 @@ def test_reads_port_from_environment():
 # ---------------------------------------------------------------------------
 # Add your own tests below, e.g. "with two aces preflop my bot raises".
 # ---------------------------------------------------------------------------
+
+
+# ===== Our own tests ======================================================
+
+def _random_game_observations(n_hands, seed, raise_rate=0.5):
+    """Observations from real games with a random opponent, both seats."""
+    rng = random.Random(seed)
+    for hand in range(n_hands):
+        game = Game(make_deal(f"fuzz{seed}", hand), button_seat=hand % 2, hand_index=hand)
+        while not game.is_terminal:
+            obs = game.observation(game.to_act)
+            yield obs, game
+            raises = [a for a in obs.legal_actions if a in (Action.RAISE_HALF, Action.RAISE_POT)]
+            game.apply(rng.choice(raises) if raises and rng.random() < raise_rate
+                       else rng.choice(obs.legal_actions))
+
+
+def test_fuzz_every_spot_is_legal(bot):
+    """3000 hands of random play from both seats: every answer legal, no crash."""
+    _, client = bot
+    start_half(client)
+    seen = 0
+    for obs, _ in _random_game_observations(3000, seed=11):
+        r = client.post("/act", json={"observation": obs.to_dict(), "hand_results": []},
+                        headers=AUTH)
+        assert r.status_code == 200, r.text
+        assert coerce_action(r.json()["action"]) in obs.legal_actions
+        seen += 1
+    assert seen > 3000
+
+
+def test_survives_garbage_in_on_hand_end(bot):
+    """A malformed hand result must never be reported as an error."""
+    module, client = bot
+    start_half(client)
+    weird = [{"hand_index": 5}, {"went_to_showdown": True}, {}, {"winner": "me", "hand_index": -3}]
+    obs = Game(make_deal(1, 0), 0).observation(0).to_dict()
+    r = client.post("/act", json={"observation": obs, "hand_results": weird}, headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["hand_end_errors"] == []
+
+
+def test_strategy_survives_unknown_history(bot):
+    """An action history that matches no tree node must fall back, not crash."""
+    module, _ = bot
+    module.new_half(AgentConfig(), module.MEMORY)
+    obs = Game(make_deal(1, 0), 0).observation(0).to_dict()
+    obs["action_history"] = [{"street": "FLOP", "is_me": False, "action": "RAISE_POT",
+                              "amount": 999, "street_total": 999}] * 9
+    assert module.choose_action(obs, module.MEMORY) in obs["legal_actions"]
+
+
+def test_decisions_are_fast():
+    """Mean decision time must leave room in the 8 s bank (~4000 calls/half)."""
+    import time
+    module = load_agent()
+    module.new_half(AgentConfig(), module.MEMORY)
+    obs_list = [o.to_dict() for o, _ in _random_game_observations(300, seed=5)]
+    for o in obs_list[:50]:
+        module.choose_action(o, module.MEMORY)          # warm up
+    t = time.perf_counter()
+    for o in obs_list:
+        module.choose_action(o, module.MEMORY)
+    per = (time.perf_counter() - t) / len(obs_list)
+    assert per < 0.0008, f"{per*1e3:.2f} ms per decision is too slow"
+
+
+def test_never_folds_when_checking_is_free(bot):
+    _, client = bot
+    start_half(client)
+    for obs, _ in _random_game_observations(400, seed=3):
+        if obs.to_call == 0:
+            r = client.post("/act", json={"observation": obs.to_dict(), "hand_results": []},
+                            headers=AUTH)
+            assert r.json()["action"] != "FOLD"
+
+
+def test_luck_adjusted_equity_matches_reference_evaluator():
+    """The all-in adjustment's exact runout equity must agree with evaluator.py."""
+    from itertools import combinations
+
+    import evaluator
+    from pokerbot import luck
+
+    for i in range(6):
+        deal = make_deal("luck", i)
+        a, b = deal.hole_cards
+        for k in (3, 4):
+            known = tuple(deal.board[:k])
+            rest = [c for c in range(36) if c not in set(a) | set(b) | set(known)]
+            w = n = 0
+            for r in combinations(rest, 5 - k):
+                sa, sb = evaluator.omaha_score(a, known + r), evaluator.omaha_score(b, known + r)
+                w += 1 if sa > sb else (0.5 if sa == sb else 0)
+                n += 1
+            assert abs(luck.equity(a, b, known) - w / n) < 1e-12
+
+
+def test_luck_adjustment_never_breaks_on_hand_end():
+    """All-in showdown results (and odd ones) go through the valve without error."""
+    module = load_agent()
+    mem = {}
+    module.new_half(AgentConfig(), mem)
+    calls = 0
+    for o, _ in _random_game_observations(200, seed=21):
+        module.choose_action(o.to_dict(), mem)
+        deal = make_deal(1, o.hand_index)
+        module.on_hand_end({"hand_index": o.hand_index, "my_net": 80, "pot": 160,
+                            "went_to_showdown": True, "board": list(deal.board),
+                            "opp_hole": list(deal.hole_cards[1]), "winner": "me"}, mem)
+        calls += 1
+    assert mem["net"][0] == calls      # every result reached the valve

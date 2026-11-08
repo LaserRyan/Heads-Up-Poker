@@ -1,0 +1,12 @@
+# Training code and its generated data never run at match time.
+dev/
+# Build-only intermediates and training checkpoints (the checkpoints are ~100 MB).
+pokerbot/data/*_ckpt.npz
+pokerbot/data/blueprint_test*.npz
+pokerbot/data/hands5.npy
+pokerbot/data/canon5.npy
+pokerbot/data/five_score.npy
+.git
+**/__pycache__
+**/*.pyc
+.pytest_cache

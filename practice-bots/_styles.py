@@ -17,11 +17,11 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from bot.fast_eval import colex, omaha_batch  # noqa: E402
+from tulip.fast_eval import colex, omaha_batch  # noqa: E402
 from game import Action, Street  # noqa: E402
 
 _DATA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                     "bot", "data", "preflop_equity.npy")
+                     "tulip", "data", "preflop_equity.npy")
 PREFLOP = np.load(_DATA).astype(np.float32)
 PREFLOP_SORTED = np.sort(PREFLOP)
 

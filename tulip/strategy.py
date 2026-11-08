@@ -13,7 +13,7 @@ How a decision is made:
      - semi-bluffs: hands with real chances to improve, on flop/turn
      - rare pure bluffs on the river when checked to.
 
-  4. Adjust to the opponent (bot/reads.py learns them during the half).
+  4. Adjust to the opponent (tulip/reads.py learns them during the half).
      Every adjustment is capped and scaled by how sure we are of the read:
      #2 respect honest bettors   - fold more to bets from players whose bets
                                    keep turning out strong at showdown
@@ -33,10 +33,10 @@ import time
 
 import numpy as np
 
-from bot import reads
+from tulip import reads
 
 from game import Action, AgentConfig, HandResult, Observation, Street
-from bot.fast_eval import colex, current_strength_batch, omaha_batch, scores_table
+from tulip.fast_eval import colex, current_strength_batch, omaha_batch, scores_table
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 PREFLOP = np.load(os.path.join(_HERE, "data", "preflop_equity.npy")).astype(np.float32)

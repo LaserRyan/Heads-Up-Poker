@@ -20,7 +20,7 @@ each half like the tournament requires.
 import numpy as np
 
 from game import Action, Street
-from bot.fast_eval import omaha_batch
+from tulip.fast_eval import omaha_batch
 
 DECAY = 0.993             # per hand: weight of old evidence (~140-hand memory)
 RAMP_START, RAMP_FULL = 50, 200

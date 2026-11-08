@@ -4,8 +4,8 @@ build_preflop_table.py - precompute every starting hand's equity vs a random han
 Run once from the repo root (takes a few minutes):
     python tools/build_preflop_table.py [samples_per_hand]
 
-Writes bot/data/preflop_equity.npy: float16 array of length C(36,5), indexed by
-the hand's colex index (see bot/fast_eval.py). Hands that are the same up to
+Writes tulip/data/preflop_equity.npy: float16 array of length C(36,5), indexed by
+the hand's colex index (see tulip/fast_eval.py). Hands that are the same up to
 relabelling suits share one simulated value.
 """
 
@@ -20,7 +20,7 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from bot.fast_eval import N5, colex, omaha_batch, scores_table  # noqa: E402
+from tulip.fast_eval import N5, colex, omaha_batch, scores_table  # noqa: E402
 
 
 def all_hands() -> np.ndarray:
@@ -79,7 +79,7 @@ def main() -> None:
     lookup = dict(zip(classes.tolist(), range(len(classes))))
     pos = np.array([lookup[c] for c in canon.tolist()])
     table = eq_by_class[pos].astype(np.float16)
-    out = os.path.join(ROOT, "bot", "data", "preflop_equity.npy")
+    out = os.path.join(ROOT, "tulip", "data", "preflop_equity.npy")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     np.save(out, table)
     print(f"wrote {out} in {time.time() - t0:.0f}s; "

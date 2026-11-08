@@ -23,9 +23,9 @@ import time
 import numpy as np
 
 from game import Action, AgentConfig, HandResult, Observation, Street
-from bot.fast_eval import colex, current_strength_batch, omaha_batch, scores_table
+from tulip.fast_eval import colex, current_strength_batch, omaha_batch, scores_table
 
-_HERE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bot")
+_HERE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tulip")
 PREFLOP = np.load(os.path.join(_HERE, "data", "preflop_equity.npy")).astype(np.float32)
 PREFLOP_SORTED = np.sort(PREFLOP)
 scores_table()  # build the scoring table at import (server startup), not mid-hand
